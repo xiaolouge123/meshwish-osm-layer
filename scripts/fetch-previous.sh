@@ -24,7 +24,7 @@ aws() { aws_cli "$WORK_DIR" "$@"; }
 s3() { echo "s3://$S3_BUCKET/$1"; }
 get() { py latest.py get /work/latest.json "$1"; }
 
-if ! aws s3 cp "$(s3 "${S3_PREFIX:+$S3_PREFIX/}latest.json")" /work/latest.json --only-show-errors 2>/dev/null; then
+if ! s3_get_optional "$WORK_DIR" "$(s3 "${S3_PREFIX:+$S3_PREFIX/}latest.json")" /work/latest.json; then
   log "no latest.json under $OSM_S3_URI: first build"
   exit 0
 fi

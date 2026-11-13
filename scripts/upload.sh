@@ -96,7 +96,7 @@ fi
 # 3. latest.json, last.
 if [[ "$SET_LATEST" == 1 ]]; then
   old=-
-  if aws s3 cp "$(s3 latest.json)" "$(in_work "$STAGE/old-latest.json")" --only-show-errors 2>/dev/null; then
+  if s3_get_optional "$WORK_DIR" "$(s3 latest.json)" "$(in_work "$STAGE/old-latest.json")"; then
     old=$(in_work "$STAGE/old-latest.json")
   else
     log "no latest.json yet; this is the first build"

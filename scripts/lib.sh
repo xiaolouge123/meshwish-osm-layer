@@ -101,3 +101,14 @@ split_s3_uri() {
   S3_PREFIX=${S3_PREFIX#/}
   S3_PREFIX=${S3_PREFIX%/}
 }
+
+# s3_get_optional DIR S3URL DEST: download a small object; returns 1 when it does not exist and
+# dies on any other error, so a failing read is never mistaken for "no previous build".
+s3_get_optional() {
+  local dir=$1 url=$2 dest=$3 err
+  err=$(aws_cli "$dir" s3 cp "$url" "$dest" --only-show-errors 2>&1) && return 0
+  if [[ "$err" == *"404"* || "$err" == *"Not Found"* || "$err" == *"NoSuchKey"* ]]; then
+    return 1
+  fi
+  die "cannot read $url: $err"
+}
