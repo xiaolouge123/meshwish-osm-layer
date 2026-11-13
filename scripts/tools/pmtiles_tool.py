@@ -163,23 +163,30 @@ class Archive:
         raw = self._read(h["metadata_offset"], h["metadata_length"])
         return json.loads(decompress(raw, h["internal_compression"]) or b"{}")
 
-    def _directory(self, offset, length):
+    def _directory(self, offset, length, cache=True):
         key = (offset, length)
-        if key not in self._dirs:
-            raw = self._read(offset, length)
-            self._dirs[key] = parse_directory(decompress(raw, self.header["internal_compression"]))
-        return self._dirs[key]
+        if key in self._dirs:
+            return self._dirs[key]
+        entries = parse_directory(decompress(self._read(offset, length), self.header["internal_compression"]))
+        if cache:
+            self._dirs[key] = entries
+        return entries
 
     def entries(self):
-        """Every tile entry (tile_id, offset, length, run_length), leaf directories expanded."""
+        """Every tile entry (tile_id, offset, length, run_length) in tile id order.
+
+        Leaf directories are read one at a time and not kept: a planet archive has tens of
+        millions of entries.
+        """
         h = self.header
-        stack = [(h["root_offset"], h["root_length"])]
-        while stack:
-            for tile_id, off, length, run in self._directory(*stack.pop()):
-                if run == 0:
-                    stack.append((h["leaf_offset"] + off, length))
-                else:
-                    yield tile_id, off, length, run
+        for tile_id, off, length, run in self._directory(h["root_offset"], h["root_length"]):
+            if run:
+                yield tile_id, off, length, run
+                continue
+            for entry in self._directory(h["leaf_offset"] + off, length, cache=False):
+                if entry[3] == 0:
+                    raise ValueError("nested leaf directories are not supported")
+                yield entry
 
     def find(self, tile_id):
         h = self.header

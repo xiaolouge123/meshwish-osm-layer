@@ -9,6 +9,8 @@ trap '/usr/local/sbin/meshwish-osm-delete-self finished' EXIT
 . /etc/meshwish-osm/env
 echo "$(date -u +%FT%TZ) bootstrap $NAME"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -q && apt-get install -y -q docker.io docker-buildx git curl || exit 1
+# a fresh Ubuntu runs its own apt jobs at boot: wait for their lock instead of failing
+apt_get() { apt-get -o DPkg::Lock::Timeout=900 "$@"; }
+apt_get update -q && apt_get install -y -q docker.io docker-buildx git curl || exit 1
 git clone -q "$REPO_URL" /opt/meshwish-osm-layer && git -C /opt/meshwish-osm-layer checkout -q "$REPO_REF" || exit 1
 bash /opt/meshwish-osm-layer/hetzner/run.sh

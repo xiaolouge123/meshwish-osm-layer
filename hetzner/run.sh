@@ -12,7 +12,10 @@ STAMP=$(date -u +%Y%m%dT%H%MZ)
 STATUS=failed
 BUILD_DIR=""
 METHOD_URL="${REPO_URL%.git}/tree/$(git -C "$REPO" rev-parse HEAD)"
-export METHOD_URL
+# osmium's id sets for a planet take a few GB; planetiler takes its share of RAM in build.sh
+TOOLS_MEMORY=${TOOLS_MEMORY:-16g}
+TOOLS_CPUS=${TOOLS_CPUS:-8}
+export METHOD_URL TOOLS_MEMORY TOOLS_CPUS
 
 upload_logs() {
   local dir=$WORK/logs-$STAMP
