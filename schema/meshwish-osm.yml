@@ -1,0 +1,237 @@
+# meshwish OSM layer, schema 1 -- planetiler "custom map" profile (generate-custom --schema=...).
+#
+# One PMTiles v3 archive, z5-14, gzip-compressed MVT tiles, holding the OpenStreetMap features
+# meshwish draws on 3D-printed terrain: lakes, rivers, glaciers, paths, roads, peaks and the sea.
+# Readers pick zoom by print scale, not by screen: the smallest z whose tile width W_z(lat) is
+# <= 0.82 * L, L being the model's long side on the ground. MVT quantization (W/4096) is then
+# <= L/5000, i.e. <= 0.05 mm on a 250 mm print, and every pixel threshold below is a print size:
+#   polygons  min_size 1.25 px    -> sqrt(area) >= 1.25 px    (1 mm^2 at 250 mm)
+#   lines     min_size 3.7 px     -> length >= 3.7 px         (3 mm at 250 mm)
+#   simplify  tolerance 0.0625 px -> 0.05 mm at 250 mm
+# z14 is the top level: from about 2 km (equator; 1.5 km at 46 N) up, z14 meets that error.
+#
+# Contract with readers (bump `version` below for any change to it):
+#   layers and attributes (all values are the OSM tag strings, unparsed):
+#     water     water, name           natural=water, landuse=reservoir, waterway=riverbank
+#     glacier   name                  natural=glacier
+#     waterway  waterway, name, width waterway=river|stream|canal
+#     path      highway, name, sac_scale
+#     road      highway               motorway..tertiary and their _link roads
+#     peak      name, ele, natural    natural=peak|volcano
+#     ocean     (none)                osmdata.openstreetmap.de water polygons
+#   feature id: osm_id * 10 + {1 node, 2 way, 3 relation}; ocean features all have id 0.
+#     Tiles cut features; readers merge polygon pieces by id, then union a layer as a whole
+#     (OSM has some glaciers drawn twice). Ocean pieces share id 0 and are just unioned.
+#   ocean: tile_post_process.merge_polygons plus the constant id make every all-sea tile the
+#     same bytes, so the archive stores it once (99% of ocean tiles); readers can cache tile
+#     content by (offset, length).
+#   metadata: planetiler writes name, description, attribution, version (= this schema's
+#     `version`), bounds, minzoom/maxzoom, vector_layers and the OSM replication timestamp,
+#     sequence and URL. scripts/build.sh then adds meshwish_schema (integer, = version),
+#     planet_date, planet_sequence, osmdata_date, build_id, license (ODbL-1.0) and method_url.
+#     Readers check meshwish_schema and turn the layer off when they do not know the number.
+#
+# Filtering (OSM tags; the input is pre-filtered by osmium with the same tag lists, see
+# scripts/build.sh):
+#   - streams tagged intermittent=yes are dropped (rivers and canals are kept: in dry regions
+#     the intermittent ones are most of the rivers there are);
+#   - waterways tagged tunnel=culvert are dropped;
+#   - footway=sidewalk|crossing|traffic_island|link|access_aisle are dropped (they double roads);
+#   - roads stop at tertiary (no residential, service, unclassified).
+# Lowest zoom per category (inclusive over latitude; readers apply the exact rule by L):
+#   river, canal with a name  z5    river, canal       z8
+#   stream with a name        z11   stream             z13
+#   path with a name or sac_scale z10   path           z12
+#   motorway, trunk, primary  z8    other roads        z10
+#   peak with name and ele    z5    peak               z10 (z5-11 thinned: 2 per 32 px cell, highest first)
+#   water, glacier, ocean     z5    (dropped below min_size at each zoom)
+# Not expressible here, so not done: hiking route relation membership (would need a Java
+# profile); joining river islands that share an edge before the min_size test (at z<=13 a few
+# small river islands are filled as water, e.g. the Sense at z9 +7% area, z14 unaffected).
+schema_name: meshwish-osm
+schema_description: Print-scale OpenStreetMap water, waterways, glaciers, paths, roads, peaks and sea for meshwish terrain models
+attribution: <a href="https://www.openstreetmap.org/copyright">&copy; OpenStreetMap contributors</a>
+version: "1"
+examples: meshwish-osm.spec.yml
+args:
+  osm_path: /in/needed.osm.pbf
+  water_path: /ocean/water-polygons-split-4326.zip
+  minzoom: 5
+  maxzoom: 14
+  simplify_tolerance: 0.0625
+  simplify_tolerance_at_max_zoom: 0.0625
+  min_feature_size: 1.25
+  min_feature_size_at_max_zoom: 0.0625
+tag_mappings:
+  ele_num:
+    input: ele
+    type: double
+definitions:
+  osm_id: &osm_id '${ feature.id * 10 + (feature.osm_type == "relation" ? 3 : (feature.osm_type == "way" ? 2 : 1)) }'
+sources:
+  osm:
+    type: osm
+    local_path: '${ args.osm_path }'
+  ocean:
+    type: shapefile
+    local_path: '${ args.water_path }'
+    projection: EPSG:4326
+layers:
+  - id: water
+    buffer: 2
+    features:
+      - source: osm
+        id: *osm_id
+        geometry: polygon
+        min_zoom: 5
+        min_size: 1.25
+        tolerance: 0.0625
+        include_when:
+          - natural: water
+          - landuse: reservoir
+          - waterway: riverbank
+        attributes:
+          - key: water
+            coalesce:
+              - tag_value: water
+              - tag_value: landuse
+              - tag_value: waterway
+          - key: name
+            tag_value: name
+  - id: glacier
+    buffer: 2
+    features:
+      - source: osm
+        id: *osm_id
+        geometry: polygon
+        min_zoom: 5
+        min_size: 1.25
+        tolerance: 0.0625
+        include_when:
+          natural: glacier
+        attributes:
+          - key: name
+            tag_value: name
+  - id: waterway
+    buffer: 2
+    features:
+      - source: osm
+        id: *osm_id
+        geometry: line
+        include_when:
+          waterway: [river, stream, canal]
+        exclude_when:
+          - tunnel: culvert
+          - __all__:
+              waterway: stream
+              intermittent: "yes"
+        min_zoom:
+          default_value: 13
+          overrides:
+            5:
+              __all__:
+                waterway: [river, canal]
+                name: __any__
+            8:
+              waterway: [river, canal]
+            11:
+              __all__:
+                waterway: stream
+                name: __any__
+        min_size: 3.7
+        tolerance: 0.0625
+        attributes:
+          - key: waterway
+            tag_value: waterway
+          - key: name
+            tag_value: name
+          - key: width
+            tag_value: width
+  - id: path
+    buffer: 2
+    features:
+      - source: osm
+        id: *osm_id
+        geometry: line
+        include_when:
+          highway: [path, footway, bridleway, steps, track, via_ferrata]
+        exclude_when:
+          footway: [sidewalk, crossing, traffic_island, link, access_aisle]
+        min_zoom:
+          default_value: 12
+          overrides:
+            10:
+              - name: __any__
+              - sac_scale: __any__
+        min_size: 3.7
+        tolerance: 0.0625
+        attributes:
+          - key: highway
+            tag_value: highway
+          - key: name
+            tag_value: name
+          - key: sac_scale
+            tag_value: sac_scale
+  - id: road
+    buffer: 2
+    features:
+      - source: osm
+        id: *osm_id
+        geometry: line
+        include_when:
+          highway: [motorway, motorway_link, trunk, trunk_link, primary, primary_link, secondary, secondary_link, tertiary, tertiary_link]
+        min_zoom:
+          default_value: 10
+          overrides:
+            8:
+              highway: [motorway, trunk, primary]
+        min_size: 3.7
+        tolerance: 0.0625
+        attributes:
+          - key: highway
+            tag_value: highway
+  - id: peak
+    features:
+      - source: osm
+        id: *osm_id
+        geometry: point
+        include_when:
+          natural: [peak, volcano]
+        min_zoom:
+          default_value: 10
+          overrides:
+            5:
+              __all__:
+                name: __any__
+                ele: __any__
+        point_label_grid:
+          pixel_size:
+            maxzoom: 11
+            value: 32
+          limit:
+            maxzoom: 11
+            value: 2
+        sort_key_descending:
+          tag_value: ele_num
+        attributes:
+          - key: name
+            tag_value: name
+          - key: ele
+            tag_value: ele
+          - key: natural
+            tag_value: natural
+  - id: ocean
+    buffer: 2
+    features:
+      - source: ocean
+        # Constant id: with per-row ids every 1-degree source cell would make its own all-sea
+        # tile and the archive could no longer store that tile once.
+        id: 0
+        geometry: polygon
+        min_zoom: 5
+    tile_post_process:
+      merge_polygons:
+        min_area: 1.5625
+        min_area_at_max_zoom: 0.0039
+        tolerance: 0.0625
+        tolerance_at_max_zoom: 0.0625

@@ -1,0 +1,195 @@
+# Rule tests for meshwish-osm.yml, run by scripts/build.sh before every build (planetiler
+# verify-custom): one OSM object in, the layer / lowest zoom / attributes expected out.
+examples:
+- name: lake
+  input:
+    source: osm
+    geometry: polygon
+    tags: {natural: water, water: lake, name: Lake A}
+  output:
+    layer: water
+    geometry: polygon
+    min_zoom: 5
+    tags: {water: lake, name: Lake A}
+
+- name: reservoir without a water tag takes the landuse value
+  input:
+    source: osm
+    geometry: polygon
+    tags: {landuse: reservoir}
+  output:
+    layer: water
+    geometry: polygon
+    min_zoom: 5
+    tags: {water: reservoir}
+
+- name: glacier
+  input:
+    source: osm
+    geometry: polygon
+    tags: {natural: glacier, name: Glacier A, name:de: Gletscher A}
+  output:
+    layer: glacier
+    geometry: polygon
+    min_zoom: 5
+    tags: {name: Glacier A}
+
+- name: named river from z5
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: river, name: River A, width: "40"}
+  output:
+    layer: waterway
+    geometry: line
+    min_zoom: 5
+    tags: {waterway: river, name: River A, width: "40"}
+
+- name: unnamed canal from z8
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: canal}
+  output:
+    layer: waterway
+    geometry: line
+    min_zoom: 8
+    tags: {waterway: canal}
+
+- name: intermittent river is kept
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: river, intermittent: "yes"}
+  output:
+    layer: waterway
+    geometry: line
+    min_zoom: 8
+    tags: {waterway: river}
+
+- name: intermittent stream is dropped
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: stream, intermittent: "yes", name: Stream A}
+  output: []
+
+- name: culvert is dropped
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: stream, tunnel: culvert}
+  output: []
+
+- name: named stream from z11
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: stream, name: Stream B}
+  output:
+    layer: waterway
+    geometry: line
+    min_zoom: 11
+    tags: {waterway: stream, name: Stream B}
+
+- name: unnamed stream from z13
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: stream, intermittent: "no"}
+  output:
+    layer: waterway
+    geometry: line
+    min_zoom: 13
+    tags: {waterway: stream}
+
+- name: mountain path with sac_scale from z10
+  input:
+    source: osm
+    geometry: line
+    tags: {highway: path, sac_scale: alpine_hiking}
+  output:
+    layer: path
+    geometry: line
+    min_zoom: 10
+    tags: {highway: path, sac_scale: alpine_hiking}
+
+- name: unnamed track from z12
+  input:
+    source: osm
+    geometry: line
+    tags: {highway: track, tracktype: grade2}
+  output:
+    layer: path
+    geometry: line
+    min_zoom: 12
+    tags: {highway: track}
+
+- name: sidewalk is dropped
+  input:
+    source: osm
+    geometry: line
+    tags: {highway: footway, footway: sidewalk}
+  output: []
+
+- name: motorway from z8
+  input:
+    source: osm
+    geometry: line
+    tags: {highway: motorway, ref: A1}
+  output:
+    layer: road
+    geometry: line
+    min_zoom: 8
+    tags: {highway: motorway}
+
+- name: tertiary link from z10
+  input:
+    source: osm
+    geometry: line
+    tags: {highway: tertiary_link}
+  output:
+    layer: road
+    geometry: line
+    min_zoom: 10
+    tags: {highway: tertiary_link}
+
+- name: residential road is dropped
+  input:
+    source: osm
+    geometry: line
+    tags: {highway: residential, name: Street A}
+  output: []
+
+- name: named peak with elevation from z5
+  input:
+    source: osm
+    geometry: point
+    tags: {natural: peak, name: Peak A, ele: "4478"}
+  output:
+    layer: peak
+    geometry: point
+    min_zoom: 5
+    tags: {natural: peak, name: Peak A, ele: "4478"}
+
+- name: unnamed volcano from z10
+  input:
+    source: osm
+    geometry: point
+    tags: {natural: volcano, ele: "1200"}
+  output:
+    layer: peak
+    geometry: point
+    min_zoom: 10
+    tags: {natural: volcano, ele: "1200"}
+
+- name: sea polygon
+  input:
+    source: ocean
+    geometry: polygon
+    tags: {x: 1, y: 2}
+  output:
+    layer: ocean
+    geometry: polygon
+    min_zoom: 5
+    tags: {}
