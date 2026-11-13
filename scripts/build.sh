@@ -31,6 +31,7 @@
 #   --require-layers L    comma list of layers that must not be empty (planet and europe: all seven)
 #   --work DIR            downloads, temp files and output (default ./work)
 #   --delete-input        delete the OSM download once filtered (a planet is ~100 GB)
+#   --dry-run             resolve the OSM file, fetch its md5, print what would be downloaded, stop
 # Environment:
 #   PLANET_MIRROR   default https://ftp.fau.de/osm-planet/pbf (any mirror of planet.openstreetmap.org/pbf)
 #   METHOD_URL      public URL of this repository at the commit used, written into the metadata
@@ -42,7 +43,7 @@ set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
 MODE=planet PLANET=latest REGION="" PBF="" BBOX="" NAME="" OCEAN_ZIP="" PREV_OSMDATA="" PREV_MANIFEST=""
-REQUIRE_LAYERS="" WORK_DIR="$PWD/work" DELETE_INPUT=0
+REQUIRE_LAYERS="" WORK_DIR="$PWD/work" DELETE_INPUT=0 DRY_RUN=0
 PLANET_ORIGIN=https://planet.openstreetmap.org/pbf
 PLANET_MIRROR=${PLANET_MIRROR:-https://ftp.fau.de/osm-planet/pbf}
 GEOFABRIK=https://download.geofabrik.de
@@ -65,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --require-layers) REQUIRE_LAYERS=$2; shift 2 ;;
     --work) WORK_DIR=$2; shift 2 ;;
     --delete-input) DELETE_INPUT=1; shift ;;
+    --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage ;;
     *) log "unknown argument $1"; usage 2 ;;
   esac
@@ -146,9 +148,10 @@ osm_input() {
   case $MODE in
     planet)
       if [[ "$PLANET" == latest ]]; then
-        PLANET=$(curl -fsS -A "$USER_AGENT" "$PLANET_ORIGIN/" | grep -o 'planet-[0-9]\{6\}\.osm\.pbf\.md5' |
+        # newest week the mirror already has (mirrors trail the origin by up to a day)
+        PLANET=$(curl -fsS -A "$USER_AGENT" "$PLANET_MIRROR/" | grep -o 'planet-[0-9]\{6\}\.osm\.pbf\.md5' |
                  sed 's/planet-\([0-9]*\).*/\1/' | sort -u | tail -1 || true)
-        [[ -n "$PLANET" ]] || die "could not find the newest planet file at $PLANET_ORIGIN/"
+        [[ -n "$PLANET" ]] || die "could not find the newest planet file at $PLANET_MIRROR/"
       fi
       file=planet-$PLANET.osm.pbf
       dest=$WORK_DIR/downloads/planet/$file
@@ -164,7 +167,26 @@ osm_input() {
       [[ -f "$PBF.md5" ]] && import_file "$PBF.md5" "$dest.md5" ;;
   esac
   # The md5 comes from the origin, not the mirror, so a bad mirror cannot vouch for itself.
+  # Exception: Geofabrik hands its largest extracts (europe, ...) to a mirror by redirect and
+  # keeps their md5 only there.
+  if [[ "$MODE" == region && ! -f "$dest.md5" ]]; then
+    local moved
+    moved=$(curl -sSI -A "$USER_AGENT" -o /dev/null -w '%{redirect_url}' "$data_url" || true)
+    if [[ -n "$moved" ]]; then
+      log "$data_url is served from $moved; taking the md5 from there"
+      md5_url=$moved.md5 data_url=$moved
+    fi
+  fi
   if [[ -n "$md5_url" && ! -f "$dest.md5" ]]; then fetch "$md5_url" "$dest.md5" || die "no checksum at $md5_url"; fi
+  kv osm_md5_url "$md5_url"
+  if [[ "$DRY_RUN" == 1 ]]; then
+    local size=""
+    [[ -n "$data_url" ]] && size=$(curl -fsSI -L -A "$USER_AGENT" "$data_url" | tr -d '\r' |
+                                   sed -n 's/^[Cc]ontent-[Ll]ength: //p' | tail -1 || true)
+    log "dry run: would use $file (${size:-?} bytes) from ${data_url:-$PBF}, md5 $(cut -d' ' -f1 "$dest.md5" 2>/dev/null)"
+    rm -rf "$STAGE"
+    exit 0
+  fi
   local want="" verified=0
   [[ -f "$dest.md5" ]] && want=$(cut -d' ' -f1 "$dest.md5")
   if [[ -f "$dest" && -n "$want" && "$(md5_of "$dest")" == "$want" ]]; then

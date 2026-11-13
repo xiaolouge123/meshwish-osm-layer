@@ -112,14 +112,19 @@ Needs bash, curl and docker; everything else runs in containers.
 scripts/build.sh --region europe/malta --work /data/osm
 scripts/build.sh --region europe/switzerland --bbox 7.55,45.92,8.07,46.19 --name zermatt
 
+# what would be downloaded (resolves "latest", fetches only the md5)
+scripts/build.sh --planet latest --dry-run
+scripts/build.sh --region europe --dry-run
+
 # the planet (about 1.5-2.5 h on 16 cores / 64 GB; ~250 GB of disk at the peak)
 prev=$(scripts/fetch-previous.sh /data/osm/prev)   # needs the storage env below
 scripts/build.sh --planet latest $prev --work /data/osm/work --delete-input
 scripts/upload.sh /data/osm/work/builds/<build_id>
 ```
 
-`build.sh` steps: rule tests → OSM download with md5 check (planet md5 from
-planet.openstreetmap.org, data from `$PLANET_MIRROR`) → `osmium tags-filter` without metadata
+`build.sh` steps: rule tests → OSM download with md5 check (planet: md5 from
+planet.openstreetmap.org, data from `$PLANET_MIRROR`; Geofabrik: md5 next to the file, which for
+the largest extracts such as `europe` is on the mirror Geofabrik redirects to) → `osmium tags-filter` without metadata
 (no user names) and optional `--bbox` cut → water polygons: download, statistics, comparison with
 the last accepted file (features ±2%, vertices ±5%, area ±0.1%, same extent, data date not
 older; otherwise the previous file is used) → planetiler → metadata → checks (header, metadata,

@@ -34,12 +34,13 @@ host_cpus() { getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu; }
 # Containers run as the calling user, so files they write stay removable without root.
 DOCKER_USER=(--user "$(id -u):$(id -g)" -e HOME=/tmp)
 
-# fetch URL DEST: resumable download with our User-Agent; DEST only appears when complete.
+# fetch URL DEST: resumable download with our User-Agent, retried on any error (a 404 too, so
+# probe uncertain URLs another way); DEST only appears when complete.
 fetch() {
   local url=$1 dest=$2
   mkdir -p "$(dirname "$dest")"
   log "download $url"
-  curl --fail --location --silent --show-error --retry 5 --retry-delay 30 --connect-timeout 30 \
+  curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 30 --connect-timeout 30 \
     --continue-at - -A "$USER_AGENT" -o "$dest.part" "$url" || return 1
   mv "$dest.part" "$dest"
 }
