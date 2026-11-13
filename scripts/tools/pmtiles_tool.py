@@ -14,7 +14,8 @@ the metadata carries the keys readers depend on, per-layer feature counts (from 
 --output_layerstats file, so it costs nothing on a planet build), feature ids (osm_id * 10 +
 1/2/3 and 0 for ocean) in a sample of tiles, and named checkpoints: known places whose tile must
 hold a given feature, e.g. a sea point inside the ocean layer or the Matterhorn in the peak
-layer. Checkpoints outside the archive's bounds are skipped. With --prev-manifest it compares
+layer. Checkpoints outside the archive's bounds are skipped; a failing checkpoint marked
+"strict": false (not yet confirmed on a real build) is only a warning. With --prev-manifest it compares
 per-layer counts with the previous build and fails on a large drop. Exits 1 when a check fails;
 the JSON report is written either way.
 
@@ -573,10 +574,11 @@ def cmd_verify(args):
                 entry["result"] = "skipped (outside bounds)"
             else:
                 ok, detail = run_checkpoint(arc, cp)
-                entry["result"] = "ok" if ok else "FAIL"
+                strict = cp.get("strict", True)
+                entry["result"] = "ok" if ok else ("FAIL" if strict else "warn")
                 entry["detail"] = detail
                 if not ok:
-                    failures.append(f"checkpoint {cp['name']}: {detail}")
+                    (failures if strict else warnings).append(f"checkpoint {cp['name']}: {detail}")
             cps.append(entry)
         if args.min_checkpoints and sum(c["result"] == "ok" for c in cps) < args.min_checkpoints:
             failures.append(f"fewer than {args.min_checkpoints} checkpoints apply to this archive")
