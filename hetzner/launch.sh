@@ -26,8 +26,8 @@
 # Cost (Hetzner list prices of 2026-11-10 after the June increase, from cloudtally.eu; check
 # the console before relying on them): CCX43, 16 dedicated vCPU / 64 GB / 360 GB NVMe, about
 # EUR 0.44 per hour plus EUR 0.001 per hour for the IPv4 address; traffic in is free. A planet
-# build takes about 1.5-2.5 h (download ~96 GB, filter, tile, upload ~25 GB): EUR 0.7-1.2. The
-# European test run (~33 GB extract) about 1 h: EUR 0.4-0.5. The MAX_HOURS guard caps a stuck
+# build takes about 1-1.5 h (download ~96 GB, filter, tile, upload ~22 GB): EUR 0.5-0.7. The
+# European test run (~33 GB extract) about 30 min: EUR 0.25. The MAX_HOURS guard caps a stuck
 # run at 6 h, EUR 2.7. Storage on R2 is separate: about USD 0.4 a month per planet build kept.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
