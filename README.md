@@ -118,8 +118,8 @@ scripts/build.sh --region europe/switzerland --bbox 7.55,45.92,8.07,46.19 --name
 scripts/build.sh --planet latest --dry-run
 scripts/build.sh --region europe --dry-run
 
-# the planet (about 1-1.5 h on 16 cores / 64 GB, ~130 GB of disk at the peak, estimated from
-# the European extract: 20 min, 19 GB of RAM in use, 75 GB of disk without --delete-input)
+# the planet (about 1 h on 16 cores / 64 GB, ~120 GB of disk at the peak; measured 2026-11-14:
+# 61 min, 18 GB of RAM in use plus page cache for the 50 GB node map, a 27 GB archive)
 prev=$(scripts/fetch-previous.sh /data/osm/prev)   # needs the storage env below
 scripts/build.sh --planet latest $prev --work /data/osm/work --delete-input
 scripts/upload.sh /data/osm/work/builds/<build_id>
@@ -196,7 +196,7 @@ The server receives the Hetzner token (to delete itself) and the storage key; ke
 project for this job alone and scope the storage key to the one bucket.
 
 **Cost** (Hetzner list prices of November 2026; check the console): CCX43 about €0.44/h, IPv4
-about €0.001/h, incoming traffic free. Planet build about 1–1.5 h ≈ €0.5–0.7; European test run
-about 30 min with setup and upload ≈ €0.25; a stuck run is deleted after 6 h ≈ €2.7 at most. R2
-storage about $0.015 per GB-month: ~$0.4/month per planet build kept (~25 GB), so current plus
-previous ≈ $0.8/month; reads stay in R2's free tier.
+about €0.001/h, incoming traffic free. Planet build about 1–1.5 h ≈ €0.5–0.7 (61 min on a 16-core
+dedicated server); European test run about 30 min with setup and upload ≈ €0.25; a stuck run is
+deleted after 6 h ≈ €2.7 at most. R2 storage about $0.015 per GB-month: ~$0.4/month per planet
+build kept (~27 GB), so current plus previous ≈ $0.8/month; reads stay in R2's free tier.
