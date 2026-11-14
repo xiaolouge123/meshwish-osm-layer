@@ -38,7 +38,8 @@ DOCKER_USER=(--user "$(id -u):$(id -g)" -e HOME=/tmp)
 # them: "--cgroup-parent=meshwish-osm.slice --label=meshwish-osm-run=<time>".
 if [[ -n "${DOCKER_RUN_ARGS:-}" ]]; then
   read -r -a _docker_run_args <<<"$DOCKER_RUN_ARGS"
-  DOCKER_USER+=("${_docker_run_args[@]}")
+  # guarded: an empty array is "unbound" under set -u in bash 3.2 (macOS)
+  DOCKER_USER+=(${_docker_run_args[@]+"${_docker_run_args[@]}"})
 fi
 
 # fetch URL DEST: resumable download with our User-Agent, retried on any error (a 404 too, so

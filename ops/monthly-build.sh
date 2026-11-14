@@ -186,7 +186,13 @@ LOCKED=1
 STATUS=running
 say "monthly build on $(hostname): $(getconf _NPROCESSORS_ONLN) cpus, $(df -h "$OSM_BASE" | awk 'NR==2 {print $4}') free; dry run $DRY_RUN"
 
-# 2. Checkout.
+# 2. Checkout. The address goes into the layer's public metadata (METHOD_URL, ODbL §4.6b): a
+# public https one, no credentials in it.
+case $OSM_REPO_URL in
+  http*://*@*) fail "OSM_REPO_URL carries credentials; it goes into the public metadata" ;;
+  https://*) ;;
+  *) fail "OSM_REPO_URL must be the repository's public https address (the metadata links to it)" ;;
+esac
 if [[ ! -d "$REPO/.git" ]]; then
   git clone -q "$OSM_REPO_URL" "$REPO"
 fi
@@ -313,8 +319,19 @@ FAILURES=$(json_get "$BUILD_DIR/manifest.json" checks.failures)
 say "built ${BUILD_DIR##*/}: $(json_get "$BUILD_DIR/manifest.json" output.bytes) bytes, checks passed"
 
 # 7. Upload, latest.json last, then prune to current and previous.
-timeout --kill-after=120 "$OSM_UPLOAD_TIMEOUT" "$REPO/scripts/upload.sh" "$BUILD_DIR" --prune ||
-  fail "upload.sh failed: latest.json is replaced only once the archive is checked, but the prune comes after it; see which build the bucket's latest.json names"
+if ! timeout --kill-after=120 "$OSM_UPLOAD_TIMEOUT" "$REPO/scripts/upload.sh" "$BUILD_DIR" --prune; then
+  # latest.json is replaced once the archive is checked, and the prune comes after it: what does
+  # the bucket name now? This build there means only the prune failed, and the next run must not
+  # build the planet again (that would push the real previous build out of its rollback slot).
+  rm -rf "$PREV"
+  timeout 600 "$REPO/scripts/fetch-previous.sh" "$PREV" >/dev/null 2>&1 || true
+  NOW=$( (json_get "$PREV/latest.json" current.build_id 2>/dev/null) || true)
+  if [[ -n "$NOW" && "$NOW" == "${BUILD_DIR##*/}" ]]; then
+    [[ "$FORCE_FILE" == 1 ]] && rm -f "$OSM_BASE/force-next-run"
+    fail "uploaded ${BUILD_DIR##*/} and latest.json names it, but the prune failed: remove older builds by hand"
+  fi
+  fail "upload.sh failed; latest.json names ${NOW:-?}, the build readers keep"
+fi
 rm -f "$BUILD_DIR"/*.pmtiles
 rm -rf "$BUILD_DIR/input"
 [[ "$FORCE_FILE" == 1 ]] && rm -f "$OSM_BASE/force-next-run"
