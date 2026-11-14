@@ -26,7 +26,9 @@ The timer starts the service on the first Thursday of each month at 01:30 UTC (p
 4. compares the newest planet file on the mirror (`planet-YYMMDD`) with the one the current
    build's manifest names (its `planet_date` when it names none): the same planet is a **skip**
    (exit 0). `--force`, or the file `$OSM_BASE/force-next-run`, builds
-   anyway (e.g. after a rule change);
+   anyway (e.g. after a rule change); the file stays until that build is uploaded, and becomes
+   `force-next-run.unconfirmed` when an upload failed and the bucket could not be read after it
+   (look at the bucket's latest.json, then rename it back or delete it);
 5. cleans up: earlier builds keep only their manifest, parts and logs (the newest 12), old planet
    downloads and all but the newest two water polygon downloads go; then it needs
    `OSM_MIN_FREE_GB` (160) free;

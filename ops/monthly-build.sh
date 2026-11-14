@@ -140,7 +140,9 @@ print(json.dumps({"discord": {"content": text[:1900]},
     "$NOTIFY_WEBHOOK_FORMAT" "$text")
   # The address (it carries the hook's token) and the body (log lines) off the command line, which
   # other users may read: the address as a curl config on a pipe, the body on stdin.
-  curl -fsS -m 30 --retry 3 -K <(printf 'url = "%s"\n' "$NOTIFY_WEBHOOK_URL") -H 'Content-Type: application/json' \
+  local url=${NOTIFY_WEBHOOK_URL//\\/\\\\}  # a curl config string: backslashes and quotes escaped
+  url=${url//\"/\\\"}
+  curl -fsS -m 30 --retry 3 -K <(printf 'url = "%s"\n' "$url") -H 'Content-Type: application/json' \
     --data-binary @- <<<"$body" >/dev/null || say "notification failed"
 }
 
@@ -194,11 +196,11 @@ case $OSM_REPO_URL in
   *) fail "OSM_REPO_URL must be the repository's public https address (the metadata links to it)" ;;
 esac
 if [[ ! -d "$REPO/.git" ]]; then
-  git clone -q "$OSM_REPO_URL" "$REPO"
+  timeout 600 git clone -q "$OSM_REPO_URL" "$REPO"
 fi
 git -C "$REPO" remote set-url origin "$OSM_REPO_URL"
 # --force: a tag moved upstream would otherwise stop this and every later run (git refuses to clobber it).
-git -C "$REPO" fetch -q --force --tags --prune --prune-tags origin
+timeout 600 git -C "$REPO" fetch -q --force --tags --prune --prune-tags origin
 # The code that runs here as a docker user with the bucket's key: a reviewed tag, pinned by hand.
 TAG=$OSM_REPO_REF
 [[ -n "$TAG" ]] || fail "OSM_REPO_REF is not set: pin a reviewed tag (vX.Y.Z), or \"latest\" to follow main's newest"
@@ -295,7 +297,12 @@ done
 ls -1dt "$WORK"/downloads/osmdata/*/ 2>/dev/null | tail -n +3 | while read -r old; do rm -rf "$old"; done
 shopt -u nullglob
 FREE_GB=$(df -Pk "$WORK" | awk 'NR==2 {printf "%d", $4 / 1048576}')
-[[ "$FREE_GB" -ge "$OSM_MIN_FREE_GB" ]] || fail "only $FREE_GB GB free under $WORK, need $OSM_MIN_FREE_GB"
+# The planet download kept for this run counts as room: it is the build's input either way.
+# (none kept, the usual case: du fails on the bare pattern, and pipefail must not end the run)
+KEPT_GB=$( (du -ck "$WORK"/downloads/planet/planet-"$NEWEST".osm.pbf* 2>/dev/null || true) |
+          awk 'END {printf "%d", $1 / 1048576}')
+[[ $(( FREE_GB + KEPT_GB )) -ge "$OSM_MIN_FREE_GB" ]] ||
+  fail "only $FREE_GB GB free under $WORK (and $KEPT_GB GB of the planet kept), need $OSM_MIN_FREE_GB"
 
 # 6. Build. timeout signals build.sh's whole process group; the docker clients pass it on.
 BEFORE=$(ls -1d "$WORK"/builds/*/ 2>/dev/null | sort || true)
@@ -324,8 +331,12 @@ if ! timeout --kill-after=120 "$OSM_UPLOAD_TIMEOUT" "$REPO/scripts/upload.sh" "$
   # the bucket name now? This build there means only the prune failed, and the next run must not
   # build the planet again (that would push the real previous build out of its rollback slot).
   rm -rf "$PREV"
-  timeout 600 "$REPO/scripts/fetch-previous.sh" "$PREV" >/dev/null 2>&1 || true
-  NOW=$( (json_get "$PREV/latest.json" current.build_id 2>/dev/null) || true)
+  if ! timeout 600 "$REPO/scripts/fetch-previous.sh" "$PREV" >/dev/null 2>&1 || [[ ! -f "$PREV/latest.json" ]]; then
+    # Not known which build is current: a forced rebuild waits until someone has looked.
+    [[ "$FORCE_FILE" == 1 ]] && mv -f "$OSM_BASE/force-next-run" "$OSM_BASE/force-next-run.unconfirmed"
+    fail "upload.sh failed and the bucket's latest.json could not be read: check it by hand before forcing a rebuild"
+  fi
+  NOW=$(json_get "$PREV/latest.json" current.build_id || true)
   if [[ -n "$NOW" && "$NOW" == "${BUILD_DIR##*/}" ]]; then
     [[ "$FORCE_FILE" == 1 ]] && rm -f "$OSM_BASE/force-next-run"
     fail "uploaded ${BUILD_DIR##*/} and latest.json names it, but the prune failed: remove older builds by hand"
