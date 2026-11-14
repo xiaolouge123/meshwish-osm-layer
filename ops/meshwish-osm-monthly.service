@@ -1,0 +1,56 @@
+# The monthly OSM layer build (monthly-build.sh), started by meshwish-osm-monthly.timer.
+# Install: ops/README.md. Paths below assume OSM_BASE=/srv/osm-layer/monthly.
+[Unit]
+Description=meshwish OSM layer: monthly planet build and upload
+Documentation=https://github.com/xiaolouge123/meshwish-osm-layer/blob/main/ops/README.md
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=osm-build
+Group=osm-build
+# The docker socket; the containers themselves run as osm-build (scripts/lib.sh).
+SupplementaryGroups=docker
+EnvironmentFile=/etc/meshwish-osm/monthly-build.env
+ExecStart=/usr/local/sbin/meshwish-osm-monthly
+# Belt and braces: containers of a run that was killed (they are not in this unit's cgroup).
+# ($$ is a literal $ for systemd.)
+ExecStopPost=/bin/sh -c 'ids=$$(docker ps -q --filter label=meshwish-osm-run); [ -z "$$ids" ] || docker kill $$ids'
+# The script's own limits (fetch 30 min, build 5 h, upload 2 h) end it first.
+TimeoutStartSec=8h
+# Time to stop the containers, upload the logs and notify.
+TimeoutStopSec=5min
+
+# Lower priority for what runs in this unit: downloads and checksums of ~100 GB files. The
+# containers run in meshwish-osm.slice (OSM_DOCKER_SLICE), with their own weights.
+Nice=10
+CPUWeight=20
+IOWeight=20
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+# Hardening that keeps docker (its socket) and the work directory usable. The docker group is
+# still root-equivalent: the real limits are the containers' (non-root user, memory, CPU).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/osm-layer/monthly
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+UMask=0027

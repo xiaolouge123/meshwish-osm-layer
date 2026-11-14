@@ -1,0 +1,15 @@
+# Starts meshwish-osm-monthly.service once a month. Install: ops/README.md.
+[Unit]
+Description=meshwish OSM layer: monthly planet build
+
+[Timer]
+# The first Thursday of the month, 01:30 UTC plus up to 30 min: the weekly planet (dated Monday)
+# is on the mirrors by then, and it is night in Europe. A missed run (host down) runs at boot.
+OnCalendar=Thu *-*-01..07 01:30:00 UTC
+RandomizedDelaySec=30min
+AccuracySec=1min
+Persistent=true
+Unit=meshwish-osm-monthly.service
+
+[Install]
+WantedBy=timers.target

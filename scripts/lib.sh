@@ -33,6 +33,13 @@ host_mem_gib() {
 host_cpus() { getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu; }
 # Containers run as the calling user, so files they write stay removable without root.
 DOCKER_USER=(--user "$(id -u):$(id -g)" -e HOME=/tmp)
+# DOCKER_RUN_ARGS adds options to every container, split on whitespace. The monthly job (ops/)
+# puts the containers in its low-priority slice and labels them with the run, so it can stop
+# them: "--cgroup-parent=meshwish-osm.slice --label=meshwish-osm-run=<time>".
+if [[ -n "${DOCKER_RUN_ARGS:-}" ]]; then
+  read -r -a _docker_run_args <<<"$DOCKER_RUN_ARGS"
+  DOCKER_USER+=("${_docker_run_args[@]}")
+fi
 
 # fetch URL DEST: resumable download with our User-Agent, retried on any error (a 404 too, so
 # probe uncertain URLs another way); DEST only appears when complete.

@@ -1,0 +1,15 @@
+# The build's containers (planetiler, osmium, the AWS CLI): monthly-build.sh starts them with
+# --cgroup-parent=meshwish-osm.slice, which needs docker's systemd cgroup driver
+# (docker info -f '{{.CgroupDriver}}'). Install: ops/README.md.
+[Unit]
+Description=meshwish OSM layer build containers (low priority)
+Before=slices.target
+
+[Slice]
+# Whatever else the host runs comes first when CPU or disk is contended (default weight 100).
+CPUWeight=20
+IOWeight=20
+# On a host with other work, cap memory too (the page cache counts): the planet then
+# builds slower but leaves the rest alone. Lower PT_MEMORY / PT_XMX / TOOLS_MEMORY to match.
+#MemoryHigh=24G
+#MemoryMax=32G

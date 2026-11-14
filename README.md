@@ -17,6 +17,7 @@ monthly job that runs them.
 - `scripts/upload.sh`, `scripts/fetch-previous.sh` – publish a build to S3-compatible storage
   (Cloudflare R2) and fetch what the next build compares with.
 - `hetzner/` – run one build on a short-lived Hetzner Cloud server that deletes itself.
+- `ops/` – or run the monthly build from a systemd timer on a server of ours (`ops/README.md`).
 - `versions.env` – pinned tool images; `docker/tools.Dockerfile` – osmium and Python.
 
 ## Licence of the data (ODbL)
@@ -132,7 +133,8 @@ the largest extracts such as `europe` is on the mirror Geofabrik redirects to) �
 the last accepted file (features ±2%, vertices ±5%, area ±0.1%, same extent, data date not
 older; otherwise the previous file is used) → planetiler → metadata → checks (header, metadata,
 layer counts, ids, checkpoints, change against the previous build) → manifest. Resource limits:
-`PT_MEMORY`, `PT_XMX`, `PT_CPUS`, `PT_TIMEOUT` (planetiler), `TOOLS_MEMORY`, `TOOLS_TIMEOUT`.
+`PT_MEMORY`, `PT_XMX`, `PT_CPUS`, `PT_TIMEOUT` (planetiler), `TOOLS_MEMORY`, `TOOLS_TIMEOUT`;
+`DOCKER_RUN_ARGS` adds options to every container (the monthly job's slice and run label).
 For a local test with a small area, `--ocean-zip` takes a clip of the water polygons made with
 `scripts/tools/osmdata_tool.py clip` instead of the 900 MB file; with a 1° margin around the
 area the tiles come out identical.
@@ -168,7 +170,12 @@ Environment: `OSM_S3_URI`, `OSM_S3_ENDPOINT` (R2: `https://<account id>.r2.cloud
 bucket only), `AWS_DEFAULT_REGION` (default `auto`). `upload.sh --no-latest` uploads a build
 without making it current; `--prune` deletes builds other than current and previous.
 
-## Monthly build on Hetzner Cloud
+## Monthly build
+
+Two ways to run it every month: a short-lived Hetzner Cloud server per build (below), or a
+systemd timer on a server that stays up, which builds the newest planet with the newest release
+tag, uploads it with `--prune` only when its checks pass, and skips an unchanged planet
+(`ops/README.md`).
 
 `hetzner/launch.sh` creates a server (default CCX43: 16 dedicated vCPU, 64 GB RAM, 360 GB disk,
 Falkenstein), passes it the settings through cloud-init, and returns. The server installs
