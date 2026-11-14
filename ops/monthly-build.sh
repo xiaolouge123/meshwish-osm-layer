@@ -14,7 +14,7 @@
 #   4. decide: the newest planet file on $PLANET_MIRROR against the one the current build's
 #      manifest names (by date when it names none). The same planet (or an older one) is a skip,
 #      unless --force or the file
-#      $OSM_BASE/force-next-run (removed once read);
+#      $OSM_BASE/force-next-run (removed once a build it forced is uploaded);
 #   5. clean: earlier builds keep only their manifests and logs, stale downloads go, then at
 #      least $OSM_MIN_FREE_GB must be free (the planet peaked at 120 GB of work files);
 #   6. build: scripts/build.sh --planet <that planet> --delete-input. Its checks decide: a build
@@ -84,8 +84,13 @@ say() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
 fail() { say "ERROR: $*"; exit 1; }
 
 STATUS=failed TAG="" COMMIT="" PLANET="" BUILD_DIR="" BUILT=0 LOCKED=0
-# python3 -I: JSON in and out without quoting surprises.
-json_get() { python3 -I "$REPO/scripts/tools/latest.py" get "$1" "$2"; }
+# python3 -I: JSON in and out without quoting surprises. A null (latest.py prints None) is empty.
+json_get() {
+  local value
+  value=$(python3 -I "$REPO/scripts/tools/latest.py" get "$1" "$2")
+  [[ "$value" == None ]] && value=""
+  printf '%s\n' "$value"
+}
 
 stop_containers() {  # containers this run started, should any outlive their docker client
   local ids
@@ -232,9 +237,10 @@ NEWEST=$(curl -fsS -m 60 --retry 3 -A "$USER_AGENT" "$PLANET_MIRROR/" | grep -o 
 [[ -n "$NEWEST" ]] || fail "could not find the newest planet file at $PLANET_MIRROR/"
 PLANET="20${NEWEST:0:2}-${NEWEST:2:2}-${NEWEST:4:2}"
 say "newest planet on the mirror: $PLANET"
+# The request stays until a forced build is uploaded: a run that fails leaves it for the next.
+FORCE_FILE=0
 if [[ -f "$OSM_BASE/force-next-run" ]]; then
-  FORCE=1
-  [[ "$DRY_RUN" == 1 ]] || rm -f "$OSM_BASE/force-next-run"
+  FORCE=1 FORCE_FILE=1
 fi
 if [[ -n "$CURRENT_FILE" ]]; then
   [[ "$NEWEST" > "$CURRENT_FILE" ]] && NEWER=1 || NEWER=0
@@ -297,8 +303,9 @@ say "built ${BUILD_DIR##*/}: $(json_get "$BUILD_DIR/manifest.json" output.bytes)
 
 # 7. Upload, latest.json last, then prune to current and previous.
 timeout --kill-after=120 "$OSM_UPLOAD_TIMEOUT" "$REPO/scripts/upload.sh" "$BUILD_DIR" --prune ||
-  fail "upload.sh failed; latest.json is replaced only after the archive is checked, so readers keep the previous build"
+  fail "upload.sh failed: latest.json is replaced only once the archive is checked, but the prune comes after it; see which build the bucket's latest.json names"
 rm -f "$BUILD_DIR"/*.pmtiles
 rm -rf "$BUILD_DIR/input"
+[[ "$FORCE_FILE" == 1 ]] && rm -f "$OSM_BASE/force-next-run"
 STATUS=ok
 say "uploaded ${BUILD_DIR##*/}; latest.json points at it"

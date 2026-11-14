@@ -99,7 +99,7 @@ systemctl list-timers meshwish-osm-monthly.timer
 
 ```sh
 systemctl start --no-block meshwish-osm-monthly.service   # a real run now (skips an unchanged planet)
-sudo -u osm-build touch /srv/osm-layer/monthly/force-next-run   # make the next run build anyway
+sudo -u osm-build touch /srv/osm-layer/monthly/force-next-run   # make the next run build anyway (kept until that build is uploaded)
 journalctl -u meshwish-osm-monthly.service -f              # follow it
 systemctl status meshwish-osm-monthly.service              # last result
 cat /srv/osm-layer/monthly/last-run.json                   # status, tag, planet, build id, log file
