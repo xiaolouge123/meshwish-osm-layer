@@ -1,5 +1,7 @@
 # meshwish OSM layer
 
+Source: https://github.com/xiaolouge123/meshwish-osm-layer
+
 [meshwish](https://meshwish.ai) turns places into 3D-printable terrain models. The lakes, rivers,
 glaciers, paths, roads, peaks and sea on those models come from OpenStreetMap, through one file:
 a PMTiles archive of vector tiles (z5–14) built from the full OSM planet once a month. This

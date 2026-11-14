@@ -341,6 +341,10 @@ kv mode "$MODE"
 kv scope "$NAME"
 kv region "$REGION"
 kv bbox "$BBOX"
+if [ -z "${METHOD_URL:-}" ] && git -C "$(dirname "$0")/.." rev-parse HEAD >/dev/null 2>&1; then
+  # Run from a checkout of this repository: link the commit it builds with.
+  METHOD_URL="https://github.com/xiaolouge123/meshwish-osm-layer/tree/$(git -C "$(dirname "$0")/.." rev-parse HEAD)"
+fi
 kv method_url "${METHOD_URL:-}"
 
 timed filter osm_filter
