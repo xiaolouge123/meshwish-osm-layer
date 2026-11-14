@@ -168,8 +168,9 @@ osm_input() {
   esac
   # The md5 comes from the origin, not the mirror, so a bad mirror cannot vouch for itself.
   # Exception: Geofabrik hands its largest extracts (europe, ...) to a mirror by redirect and
-  # keeps their md5 only there.
-  if [[ "$MODE" == region && ! -f "$dest.md5" ]]; then
+  # keeps their md5 only there. Resolved on every run, a reused download's too, so the manifest
+  # always names the addresses the data and its md5 come from.
+  if [[ "$MODE" == region ]]; then
     local moved
     moved=$(curl -sSI -A "$USER_AGENT" -o /dev/null -w '%{redirect_url}' "$data_url" || true)
     if [[ -n "$moved" ]]; then
@@ -177,19 +178,30 @@ osm_input() {
       md5_url=$moved.md5 data_url=$moved
     fi
   fi
-  if [[ -n "$md5_url" && ! -f "$dest.md5" ]]; then fetch "$md5_url" "$dest.md5" || die "no checksum at $md5_url"; fi
+  # A download is reused only together with the md5 fetched with it, while they match; otherwise
+  # both are fetched again (an md5 kept alone, e.g. after --delete-input, may be older than the
+  # file now published). A dry run keeps its md5 in the stage, which it deletes: it leaves
+  # nothing behind that a later run could take for its own.
+  local md5_file=$dest.md5 want="" verified=0 reuse=0
+  [[ "$DRY_RUN" == 1 && -n "$md5_url" ]] && md5_file=$STAGE/$file.md5
+  if [[ "$DRY_RUN" != 1 && -f "$dest" && -f "$md5_file" ]]; then
+    want=$(cut -d' ' -f1 "$md5_file")
+    [[ -n "$want" && "$(md5_of "$dest")" == "$want" ]] && reuse=1
+  fi
+  if [[ "$reuse" == 0 && -n "$md5_url" ]]; then
+    fetch "$md5_url" "$md5_file" || die "no checksum at $md5_url"
+  fi
+  [[ -f "$md5_file" ]] && want=$(cut -d' ' -f1 "$md5_file")
   kv osm_md5_url "$md5_url"
   if [[ "$DRY_RUN" == 1 ]]; then
     local size=""
     [[ -n "$data_url" ]] && size=$(curl -fsSI -L -A "$USER_AGENT" "$data_url" | tr -d '\r' |
                                    sed -n 's/^[Cc]ontent-[Ll]ength: //p' | tail -1 || true)
-    log "dry run: would use $file (${size:-?} bytes) from ${data_url:-$PBF}, md5 $(cut -d' ' -f1 "$dest.md5" 2>/dev/null)"
+    log "dry run: would use $file (${size:-?} bytes) from ${data_url:-$PBF}, md5 $want"
     rm -rf "$STAGE"
     exit 0
   fi
-  local want="" verified=0
-  [[ -f "$dest.md5" ]] && want=$(cut -d' ' -f1 "$dest.md5")
-  if [[ -f "$dest" && -n "$want" && "$(md5_of "$dest")" == "$want" ]]; then
+  if [[ "$reuse" == 1 ]]; then
     log "reusing $dest (md5 ok)"
     verified=1
   elif [[ -n "$data_url" ]]; then
