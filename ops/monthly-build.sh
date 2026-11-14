@@ -24,7 +24,8 @@
 #      every build but current and previous is deleted from the bucket;
 #   8. report, whatever happened: the log goes to the journal and $OSM_BASE/logs/, a build's
 #      logs to the bucket's logs/<time>-<ok|failed>/ (as hetzner/run.sh does), the outcome to
-#      $OSM_BASE/last-run.json, and to NOTIFY_WEBHOOK_URL when set.
+#      $OSM_BASE/last-run.json; a failed, locked or skipped run to NOTIFY_CMD (its summary on
+#      stdin, e.g. ops/notify-email.sh), and the outcome to NOTIFY_WEBHOOK_URL when set.
 # --dry-run stops after step 4 with build.sh --dry-run: nothing is built, uploaded or deleted.
 # Exit status: 0 built and uploaded, skipped, or dry run; 1 failed.
 #
@@ -38,10 +39,21 @@
 #   OSM_BUILD_TIMEOUT, OSM_UPLOAD_TIMEOUT   seconds (18000, 7200)
 #   OSM_DOCKER_SLICE    systemd slice for the containers (meshwish-osm.slice; empty: docker's own)
 #   PLANET_MIRROR, PT_MEMORY, PT_XMX, PT_CPUS, TOOLS_MEMORY, TOOLS_CPUS   as for build.sh
+#   NOTIFY_CMD          run with the summary of a failed, locked or skipped run on stdin (JSON;
+#                       see notify_cmd); NOTIFY_CMD_TIMEOUT seconds (120). Its own settings,
+#                       NOTIFY_EMAIL_* and CLOUDFLARE_* (a mail token), reach it alone: they are
+#                       taken out of what the build's scripts inherit
 #   NOTIFY_WEBHOOK_URL  POST the outcome here; NOTIFY_WEBHOOK_FORMAT slack|discord|feishu
 #                       (body {"text"}, {"content"}, Feishu/Lark's text message); NOTIFY_ON
 #                       failure (default), always or never
 set -euo pipefail
+
+# The notifier's settings (NOTIFY_EMAIL_*, CLOUDFLARE_*: the mail's addresses and token) are for
+# NOTIFY_CMD alone: kept aside here and out of the environment the checkout's scripts inherit.
+declare -A NOTIFY_ENV=()
+for name in $(compgen -e); do
+  case $name in NOTIFY_EMAIL_* | CLOUDFLARE_*) NOTIFY_ENV[$name]=${!name}; unset "$name" ;; esac
+done
 
 DRY_RUN=0 FORCE=0
 while [[ $# -gt 0 ]]; do
@@ -122,6 +134,11 @@ upload_logs() {  # the build's logs next to the builds, as hetzner/run.sh does
 }
 
 notify() {
+  notify_webhook
+  notify_cmd  # after the webhook: a slow mail does not hold the other alert up
+}
+
+notify_webhook() {
   [[ -n "${NOTIFY_WEBHOOK_URL:-}" ]] || return 0
   case $NOTIFY_ON in
     always) ;;
@@ -144,6 +161,29 @@ print(json.dumps({"discord": {"content": text[:1900]},
   url=${url//\"/\\\"}
   curl -fsS -m 30 --retry 3 -K <(printf 'url = "%s"\n' "$url") -H 'Content-Type: application/json' \
     --data-binary @- <<<"$body" >/dev/null || say "notification failed"
+}
+
+# NOTIFY_CMD, when set: a command run (no arguments, NOTIFY_CMD_TIMEOUT seconds at most, 120) when a run
+# failed, found another holding the lock, or skipped an unchanged planet; a build uploaded is only
+# logged and recorded. It reads the run's summary on stdin, one JSON object: status, host, started,
+# minutes, tag, commit, planet, build_id, log (its path), and log_tail (the log's last 40 lines);
+# nothing of it on its command line. ops/notify-email.sh mails it.
+notify_cmd() {
+  [[ -n "${NOTIFY_CMD:-}" ]] || return 0
+  case $STATUS in failed | locked | skipped) ;; *) return 0 ;; esac
+  local summary
+  summary=$(tail -n 40 "$LOG" 2>/dev/null | python3 -I -c 'import json, sys
+keys = ("status", "host", "started", "minutes", "tag", "commit", "planet", "build_id", "log")
+out = dict(zip(keys, sys.argv[1:]))
+out["minutes"] = int(out["minutes"])
+out["log_tail"] = sys.stdin.read()
+print(json.dumps(out))' "$STATUS" "$(hostname)" "$STAMP" "$(( ($(date +%s) - STARTED) / 60 ))" "$TAG" "$COMMIT" \
+    "$PLANET" "${BUILD_DIR##*/}" "$LOG") || { say "notify command: no summary"; return 0; }
+  (
+    # its settings back, for it alone (export: no command line shows them)
+    for name in "${!NOTIFY_ENV[@]}"; do export "$name=${NOTIFY_ENV[$name]}"; done
+    exec timeout -k 10 "${NOTIFY_CMD_TIMEOUT:-120}" "$NOTIFY_CMD"
+  ) <<<"$summary" || say "notify command failed ($NOTIFY_CMD)"
 }
 
 finish() {

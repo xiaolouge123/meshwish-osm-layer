@@ -20,8 +20,9 @@ ExecStart=/usr/local/sbin/meshwish-osm-monthly
 ExecStopPost=/bin/sh -c 'ids=$$(docker ps -q --filter label=meshwish-osm-run); [ -z "$$ids" ] || docker kill $$ids'
 # The script's own limits (fetch 30 min, build 5 h, upload 2 h) end it first.
 TimeoutStartSec=8h
-# Time to stop the containers, upload the logs and notify.
-TimeoutStopSec=5min
+# Time to stop the containers, upload the logs and notify (the webhook up to 2 min with its
+# retries, NOTIFY_CMD 2 min).
+TimeoutStopSec=10min
 
 # Lower priority for what runs in this unit: downloads and checksums of ~100 GB files. The
 # containers run in meshwish-osm.slice (OSM_DOCKER_SLICE), with their own weights.

@@ -39,8 +39,10 @@ The timer starts the service on the first Thursday of each month at 01:30 UTC (p
    upload leaves latest.json on the previous build;
 8. whatever happened: stops any container of the run that is still going, uploads the build's
    logs to `logs/<time>-<ok|failed>/` in the bucket, writes `$OSM_BASE/last-run.json` and
-   `$OSM_BASE/logs/monthly-<time>.log` (the newest 24 stay; the journal has them too), and
-   posts to `NOTIFY_WEBHOOK_URL` if set (on failure by default).
+   `$OSM_BASE/logs/monthly-<time>.log` (the newest 24 stay; the journal has them too); a
+   failed, locked or skipped run is handed to `NOTIFY_CMD` (its summary as JSON on stdin; a
+   build uploaded is only logged), e.g. `ops/notify-email.sh`, which mails it; and the outcome
+   goes to `NOTIFY_WEBHOOK_URL` if set (on failure by default).
 
 Exit status 0 means built and uploaded, skipped or dry run; 1 means failed, and the unit shows
 as failed (`systemctl --failed`).
@@ -73,10 +75,11 @@ docker info -f '{{.CgroupDriver}}'      # systemd; otherwise set OSM_DOCKER_SLIC
 
 # 2. the wrapper and the units
 install -m 755 ops/monthly-build.sh /usr/local/sbin/meshwish-osm-monthly
+install -m 755 ops/notify-email.sh /usr/local/sbin/meshwish-osm-notify-email   # mail, if wanted
 install -m 644 ops/meshwish-osm-monthly.service ops/meshwish-osm-monthly.timer ops/meshwish-osm.slice \
   /etc/systemd/system/
 
-# 3. the settings: fill in the storage key (and a webhook if wanted)
+# 3. the settings: the storage key, OSM_REPO_REF, and the mail (or a webhook) if wanted; see below
 install -d -m 700 /etc/meshwish-osm
 install -m 600 ops/monthly-build.env.example /etc/meshwish-osm/monthly-build.env
 editor /etc/meshwish-osm/monthly-build.env
@@ -97,6 +100,30 @@ systemctl list-timers meshwish-osm-monthly.timer
 
 `OSM_BASE` other than `/srv/osm-layer/monthly` must be changed in the service's
 `ReadWritePaths` and the user's home as well.
+
+### Mail on a failed or skipped run
+
+`ops/notify-email.sh` sends the run's summary (status, tag, planet, build, the log's last 40 lines)
+through Cloudflare Email Sending. In `/etc/meshwish-osm/monthly-build.env` (root-only: systemd reads
+it and hands the values to the run; nothing of it is in this repository):
+
+| Key | What |
+|---|---|
+| `NOTIFY_CMD` | `/usr/local/sbin/meshwish-osm-notify-email` |
+| `NOTIFY_EMAIL_TO` | the address(es) to mail, comma-separated |
+| `NOTIFY_EMAIL_FROM` | the sender: an address on a domain onboarded to Email Sending |
+| `CLOUDFLARE_ACCOUNT_ID` | the account that domain is on |
+| `CLOUDFLARE_API_TOKEN` | a token with the Email Sending permission on that account, nothing else |
+
+To try it without a build (as the run would, with the env file's values):
+
+```sh
+echo '{"status": "failed", "host": "test", "log_tail": "a test of the notification"}' |
+  systemd-run --wait --pipe --collect -p User=osm-build -p Group=osm-build \
+    -p EnvironmentFile=/etc/meshwish-osm/monthly-build.env /usr/local/sbin/meshwish-osm-notify-email
+```
+
+A month with no new planet mails a "skipped" too: the run did nothing, which is worth knowing.
 
 ## Running it by hand and watching it
 
@@ -139,3 +166,6 @@ systemctl daemon-reload
   reviewed tag and move the pin by hand. With `latest` anyone who can push a tag to `main` here
   can run code on the server. A tag moved after a run used it is refused (`$OSM_BASE/tags.seen`).
 - The webhook's address and the message (log lines) reach curl on pipes, not its command line.
+- The mail's settings (`NOTIFY_EMAIL_*`, `CLOUDFLARE_*`, the token among them) are taken out of the
+  environment at the start of a run and handed to `NOTIFY_CMD` alone: the checked-out scripts
+  and the containers never see them. Give the token the Email Sending permission and nothing else.
