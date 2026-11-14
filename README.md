@@ -173,9 +173,9 @@ without making it current; `--prune` deletes builds other than current and previ
 ## Monthly build
 
 Two ways to run it every month: a short-lived Hetzner Cloud server per build (below), or a
-systemd timer on a server that stays up, which builds the newest planet with the newest release
-tag, uploads it with `--prune` only when its checks pass, and skips an unchanged planet
-(`ops/README.md`).
+systemd timer on a server that stays up, which builds the newest planet with the release tag
+it is pinned to, uploads it with `--prune` only when its checks pass, and skips an unchanged
+planet (`ops/README.md`).
 
 `hetzner/launch.sh` creates a server (default CCX43: 16 dedicated vCPU, 64 GB RAM, 360 GB disk,
 Falkenstein), passes it the settings through cloud-init, and returns. The server installs

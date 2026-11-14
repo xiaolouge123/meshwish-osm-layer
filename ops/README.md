@@ -17,9 +17,10 @@ The timer starts the service on the first Thursday of each month at 01:30 UTC (p
 30 min; a run missed while the server was down starts at boot). `monthly-build.sh` then:
 
 1. takes a lock (`flock` on `$OSM_BASE/monthly.lock`); a second run while one is going fails;
-2. fetches this repository into `$OSM_BASE/repo` and checks out the newest `vX.Y.Z` tag on
-   `main` (or the tag pinned with `OSM_REPO_REF`). The wrapper is installed separately, so a
-   new tag changes the build scripts, not the wrapper;
+2. fetches this repository into `$OSM_BASE/repo` and checks out the tag `OSM_REPO_REF` pins
+   (required; `latest` follows the newest `vX.Y.Z` tag on `main`); a tag whose commit changed
+   since a run used it is refused. The wrapper is installed separately, so a new tag changes
+   the build scripts, not the wrapper;
 3. runs `scripts/fetch-previous.sh` (latest.json, the current manifest, the last accepted water
    polygons);
 4. compares the newest planet file on the mirror (`planet-YYMMDD`) with the one the current
@@ -111,8 +112,9 @@ A run that is stopped or fails leaves latest.json where it was: readers keep the
 
 ## Updating, pausing, removing
 
-- New build code needs nothing: the next run takes the newest tag (unless `OSM_REPO_REF` pins
-  one). A new wrapper or new units: install them again as in step 2, then `systemctl daemon-reload`.
+- New build code: review the new tag, then set `OSM_REPO_REF` to it in the env file (with
+  `latest`, nothing). A new wrapper or new units: install them again as in step 2, then
+  `systemctl daemon-reload`.
 - Pause: `systemctl disable --now meshwish-osm-monthly.timer`.
 - Remove:
 
@@ -131,6 +133,7 @@ systemctl daemon-reload
 - The docker group is root-equivalent on the server. The unit is hardened (read-only system,
   no new privileges, no capabilities), but what limits the build is what its containers get:
   they run as `osm-build`, with memory and CPU limits, in their own slice.
-- With `OSM_REPO_REF` empty the server runs whatever the newest tag on `main` of this
-  repository holds: anyone who can push a tag there can run code on it as `osm-build`. Pin a
-  reviewed tag to rule that out, and move the pin by hand.
+- The server runs the tag `OSM_REPO_REF` pins, as `osm-build`, with the bucket's key: pin a
+  reviewed tag and move the pin by hand. With `latest` anyone who can push a tag to `main` here
+  can run code on the server. A tag moved after a run used it is refused (`$OSM_BASE/tags.seen`).
+- The webhook's address and the message (log lines) reach curl on pipes, not its command line.

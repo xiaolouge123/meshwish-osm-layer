@@ -7,8 +7,9 @@
 #
 # One run:
 #   1. lock: $OSM_BASE/monthly.lock (flock); a second run while one is going fails at once;
-#   2. checkout: fetch $OSM_REPO_URL into $OSM_BASE/repo and check out $OSM_REPO_REF or, when it
-#      is empty, the newest vX.Y.Z tag that is on origin/main;
+#   2. checkout: fetch $OSM_REPO_URL into $OSM_BASE/repo and check out the tag $OSM_REPO_REF names
+#      (required: a reviewed vX.Y.Z; "latest" follows the newest vX.Y.Z tag on origin/main); a tag
+#      whose commit changed since a run used it is refused;
 #   3. previous build: scripts/fetch-previous.sh (latest.json, the current manifest and the last
 #      accepted water polygons);
 #   4. decide: the newest planet file on $PLANET_MIRROR against the one the current build's
@@ -137,8 +138,10 @@ fmt, text = sys.argv[1], sys.argv[2]
 print(json.dumps({"discord": {"content": text[:1900]},
                   "feishu": {"msg_type": "text", "content": {"text": text}}}.get(fmt, {"text": text})))' \
     "$NOTIFY_WEBHOOK_FORMAT" "$text")
-  curl -fsS -m 30 --retry 3 -H 'Content-Type: application/json' -d "$body" "$NOTIFY_WEBHOOK_URL" >/dev/null ||
-    say "notification failed"
+  # The address (it carries the hook's token) and the body (log lines) off the command line, which
+  # other users may read: the address as a curl config on a pipe, the body on stdin.
+  curl -fsS -m 30 --retry 3 -K <(printf 'url = "%s"\n' "$NOTIFY_WEBHOOK_URL") -H 'Content-Type: application/json' \
+    --data-binary @- <<<"$body" >/dev/null || say "notification failed"
 }
 
 finish() {
@@ -150,8 +153,8 @@ finish() {
   if [[ "$LOCKED" == 1 ]]; then
     stop_containers
     [[ "$BUILT" == 1 ]] && upload_logs "$([[ "$STATUS" == ok ]] && echo ok || echo failed)"
-    # a dry run leaves the record of the last real run alone
-    [[ "$STATUS" == dry-run ]] || python3 -I -c 'import json, sys
+    # a dry run leaves the record of the last real run alone, whatever came of it
+    [[ "$DRY_RUN" == 1 ]] || python3 -I -c 'import json, sys
 *values, path = sys.argv[1:]
 keys = ("status", "started", "finished", "tag", "commit", "planet", "build_id", "log")
 with open(path, "w") as f:
@@ -190,8 +193,10 @@ fi
 git -C "$REPO" remote set-url origin "$OSM_REPO_URL"
 # --force: a tag moved upstream would otherwise stop this and every later run (git refuses to clobber it).
 git -C "$REPO" fetch -q --force --tags --prune --prune-tags origin
+# The code that runs here as a docker user with the bucket's key: a reviewed tag, pinned by hand.
 TAG=$OSM_REPO_REF
-if [[ -z "$TAG" ]]; then
+[[ -n "$TAG" ]] || fail "OSM_REPO_REF is not set: pin a reviewed tag (vX.Y.Z), or \"latest\" to follow main's newest"
+if [[ "$TAG" == latest ]]; then
   TAG=$(git -C "$REPO" tag -l 'v*' --merged origin/main --sort=v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
         tail -1 || true)
   [[ -n "$TAG" ]] || fail "no vX.Y.Z tag on origin/main of $OSM_REPO_URL"
@@ -200,8 +205,14 @@ fi
 git -C "$REPO" rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null ||
   fail "$TAG is not a tag of $OSM_REPO_URL (OSM_REPO_REF takes a tag, such as v0.1.3)"
 [[ -z "$(git -C "$REPO" status --porcelain)" ]] || fail "$REPO has local changes; leaving it as it is"
-git -C "$REPO" checkout -q --detach "refs/tags/$TAG^{commit}"
-COMMIT=$(git -C "$REPO" rev-parse HEAD)
+COMMIT=$(git -C "$REPO" rev-parse "refs/tags/$TAG^{commit}")
+# A tag is not moved: one that names another commit than when a run first used it is refused.
+SEEN=$OSM_BASE/tags.seen
+touch "$SEEN"
+WAS=$(awk -v t="$TAG" '$1 == t {print $2}' "$SEEN")
+[[ -z "$WAS" || "$WAS" == "$COMMIT" ]] || fail "$TAG was $WAS when a run used it and is $COMMIT now: refusing a moved tag"
+[[ -n "$WAS" ]] || echo "$TAG $COMMIT" >>"$SEEN"
+git -C "$REPO" checkout -q --detach "$COMMIT"
 say "using $TAG ($COMMIT)"
 if grep -q DOCKER_RUN_ARGS "$REPO/scripts/lib.sh"; then
   DOCKER_RUN_ARGS="--label=meshwish-osm-run=$STAMP${OSM_DOCKER_SLICE:+ --cgroup-parent=$OSM_DOCKER_SLICE}"
