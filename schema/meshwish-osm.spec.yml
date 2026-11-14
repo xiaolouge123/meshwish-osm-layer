@@ -67,6 +67,30 @@ examples:
     min_zoom: 8
     tags: {waterway: river}
 
+- name: a river way of any length is kept (no line minimum, so rivers have no gaps in cities)
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: river, name: River B, bridge: "yes"}
+  output:
+    layer: waterway
+    geometry: line
+    min_zoom: 5
+    min_size: 0
+    tags: {waterway: river, name: River B}
+
+- name: a canal way of any length is kept
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: canal, name: Canal B}
+  output:
+    layer: waterway
+    geometry: line
+    min_zoom: 5
+    min_size: 0
+    tags: {waterway: canal, name: Canal B}
+
 - name: intermittent stream is dropped
   input:
     source: osm
@@ -81,7 +105,14 @@ examples:
     tags: {waterway: stream, tunnel: culvert}
   output: []
 
-- name: named stream from z11
+- name: river in a culvert is dropped
+  input:
+    source: osm
+    geometry: line
+    tags: {waterway: river, tunnel: culvert, name: River C}
+  output: []
+
+- name: named stream from z11, with the line minimum
   input:
     source: osm
     geometry: line
@@ -90,6 +121,7 @@ examples:
     layer: waterway
     geometry: line
     min_zoom: 11
+    min_size: 3.7
     tags: {waterway: stream, name: Stream B}
 
 - name: unnamed stream from z13

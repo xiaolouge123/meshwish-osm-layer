@@ -7,6 +7,7 @@
 # <= L/5000, i.e. <= 0.05 mm on a 250 mm print, and every pixel threshold below is a print size:
 #   polygons  min_size 1.25 px    -> sqrt(area) >= 1.25 px    (1 mm^2 at 250 mm)
 #   lines     min_size 3.7 px     -> length >= 3.7 px         (3 mm at 250 mm)
+#             except rivers and canals: min_size 0, every way kept (below)
 #   simplify  tolerance 0.0625 px -> 0.05 mm at 250 mm
 # z14 is the top level: from about 2 km (equator; 1.5 km at 46 N) up, z14 meets that error.
 #
@@ -45,6 +46,16 @@
 #   motorway, trunk, primary  z8    other roads        z10
 #   peak with name and ele    z5    peak               z10 (z5-11 thinned: 2 per 32 px cell, highest first)
 #   water, glacier, ocean     z5    (dropped below min_size at each zoom)
+# Rivers and canals keep every way at every zoom (min_size 0). The length test applies to one OSM
+# way at a time, and OSM cuts a river into short ways at bridges, weirs, islands and name changes:
+# with the 3.7 px minimum, whole stretches of big rivers through cities fell out at z8-9 (the
+# 1.4 km a way needed at z8 is a few bridges' worth). In the European build of 2026-11-14, in 20 km
+# around each city, z8 lacked 65% of the Danube's course through Budapest (gaps up to 5 km, 6 mm
+# on a 200 km print), 20% of the Thames in London, 18% of the Seine in Paris, 8% of the Rhine in
+# Basel; z10 and up were whole. Merging the ways into one line would close the gaps too but give
+# readers features without OSM ids, so the ways stay as they are and the short ones are kept.
+# Streams keep the 3.7 px minimum: they are many, and a short stream way left out is no gap in a
+# river that is drawn.
 # Not expressible here, so not done: hiking route relation membership (would need a Java
 # profile); joining river islands that share an edge before the min_size test (at z<=13 a few
 # small river islands are filled as water, e.g. the Sense at z9 +7% area, z14 unaffected).
@@ -115,38 +126,45 @@ layers:
   - id: waterway
     buffer: 2
     features:
+      # Rivers and canals: every way, however short (min_size 0; see the header comment).
       - source: osm
         id: *osm_id
         geometry: line
         include_when:
-          waterway: [river, stream, canal]
+          waterway: [river, canal]
         exclude_when:
-          - tunnel: culvert
-          - __all__:
-              waterway: stream
-              intermittent: "yes"
+          tunnel: culvert
         min_zoom:
-          default_value: 13
+          default_value: 8
           overrides:
             5:
-              __all__:
-                waterway: [river, canal]
-                name: __any__
-            8:
-              waterway: [river, canal]
-            11:
-              __all__:
-                waterway: stream
-                name: __any__
-        min_size: 3.7
+              name: __any__
+        min_size: 0
         tolerance: 0.0625
-        attributes:
+        attributes: &waterway_attributes
           - key: waterway
             tag_value: waterway
           - key: name
             tag_value: name
           - key: width
             tag_value: width
+      # Streams: a way shorter than 3.7 px is left out, as for every other line.
+      - source: osm
+        id: *osm_id
+        geometry: line
+        include_when:
+          waterway: stream
+        exclude_when:
+          - tunnel: culvert
+          - intermittent: "yes"
+        min_zoom:
+          default_value: 13
+          overrides:
+            11:
+              name: __any__
+        min_size: 3.7
+        tolerance: 0.0625
+        attributes: *waterway_attributes
   - id: path
     buffer: 2
     features:
