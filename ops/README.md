@@ -22,8 +22,9 @@ The timer starts the service on the first Thursday of each month at 01:30 UTC (p
    new tag changes the build scripts, not the wrapper;
 3. runs `scripts/fetch-previous.sh` (latest.json, the current manifest, the last accepted water
    polygons);
-4. compares the newest planet on the mirror with the current build's `planet_date`: the same
-   planet is a **skip** (exit 0). `--force`, or the file `$OSM_BASE/force-next-run`, builds
+4. compares the newest planet file on the mirror (`planet-YYMMDD`) with the one the current
+   build's manifest names (its `planet_date` when it names none): the same planet is a **skip**
+   (exit 0). `--force`, or the file `$OSM_BASE/force-next-run`, builds
    anyway (e.g. after a rule change);
 5. cleans up: earlier builds keep only their manifest, parts and logs (the newest 12), old planet
    downloads and all but the newest two water polygon downloads go; then it needs

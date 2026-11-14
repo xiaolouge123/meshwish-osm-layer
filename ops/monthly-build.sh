@@ -11,8 +11,9 @@
 #      is empty, the newest vX.Y.Z tag that is on origin/main;
 #   3. previous build: scripts/fetch-previous.sh (latest.json, the current manifest and the last
 #      accepted water polygons);
-#   4. decide: the newest planet on $PLANET_MIRROR against latest.json's current planet_date.
-#      The same planet (or an older one) is a skip, unless --force or the file
+#   4. decide: the newest planet file on $PLANET_MIRROR against the one the current build's
+#      manifest names (by date when it names none). The same planet (or an older one) is a skip,
+#      unless --force or the file
 #      $OSM_BASE/force-next-run (removed once read);
 #   5. clean: earlier builds keep only their manifests and logs, stale downloads go, then at
 #      least $OSM_MIN_FREE_GB must be free (the planet peaked at 120 GB of work files);
@@ -182,15 +183,19 @@ if [[ ! -d "$REPO/.git" ]]; then
   git clone -q "$OSM_REPO_URL" "$REPO"
 fi
 git -C "$REPO" remote set-url origin "$OSM_REPO_URL"
-git -C "$REPO" fetch -q --tags --prune --prune-tags origin
+# --force: a tag moved upstream would otherwise stop this and every later run (git refuses to clobber it).
+git -C "$REPO" fetch -q --force --tags --prune --prune-tags origin
 TAG=$OSM_REPO_REF
 if [[ -z "$TAG" ]]; then
   TAG=$(git -C "$REPO" tag -l 'v*' --merged origin/main --sort=v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' |
         tail -1 || true)
   [[ -n "$TAG" ]] || fail "no vX.Y.Z tag on origin/main of $OSM_REPO_URL"
 fi
+# A tag only: a branch name would resolve to the local branch of the first clone, never updated.
+git -C "$REPO" rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null ||
+  fail "$TAG is not a tag of $OSM_REPO_URL (OSM_REPO_REF takes a tag, such as v0.1.3)"
 [[ -z "$(git -C "$REPO" status --porcelain)" ]] || fail "$REPO has local changes; leaving it as it is"
-git -C "$REPO" checkout -q --detach "$TAG^{commit}"
+git -C "$REPO" checkout -q --detach "refs/tags/$TAG^{commit}"
 COMMIT=$(git -C "$REPO" rev-parse HEAD)
 say "using $TAG ($COMMIT)"
 if grep -q DOCKER_RUN_ARGS "$REPO/scripts/lib.sh"; then
@@ -207,12 +212,19 @@ USER_AGENT="meshwish-osm-layer/${VERSION:-unknown} (+https://meshwish.ai)"
 # 3. Previous build.
 rm -rf "$PREV"
 PREV_OPTS=$(timeout 1800 "$REPO/scripts/fetch-previous.sh" "$PREV")
-CURRENT_PLANET="" CURRENT_ID=""
+CURRENT_PLANET="" CURRENT_ID="" CURRENT_FILE=""
 if [[ -f "$PREV/latest.json" ]]; then
   CURRENT_PLANET=$(json_get "$PREV/latest.json" current.planet_date)
   CURRENT_ID=$(json_get "$PREV/latest.json" current.build_id)
 fi
-say "current build: ${CURRENT_ID:-none} (planet ${CURRENT_PLANET:-none})"
+# The planet file the current build was made from (YYMMDD, its manifest's input address): what the
+# mirror's newest is compared with. planet_date is the file header's replication time, which need
+# not be the day the file is named after.
+if [[ -f "$PREV/prev-manifest.json" ]]; then
+  CURRENT_FILE=$( (json_get "$PREV/prev-manifest.json" inputs.osm.url || true) |
+                  grep -o 'planet-[0-9]\{6\}\.osm\.pbf' | sed 's/planet-\([0-9]*\).*/\1/' || true)
+fi
+say "current build: ${CURRENT_ID:-none} (planet ${CURRENT_PLANET:-none}, file ${CURRENT_FILE:-unknown})"
 
 # 4. Decide. The same listing build.sh reads for --planet latest.
 NEWEST=$(curl -fsS -m 60 --retry 3 -A "$USER_AGENT" "$PLANET_MIRROR/" | grep -o 'planet-[0-9]\{6\}\.osm\.pbf\.md5' |
@@ -224,9 +236,15 @@ if [[ -f "$OSM_BASE/force-next-run" ]]; then
   FORCE=1
   [[ "$DRY_RUN" == 1 ]] || rm -f "$OSM_BASE/force-next-run"
 fi
-if [[ -n "$CURRENT_PLANET" && ! "$PLANET" > "$CURRENT_PLANET" && "$FORCE" == 0 ]]; then
-  STATUS=skipped
-  say "skip: the current build already has the planet of $CURRENT_PLANET (--force or $OSM_BASE/force-next-run to rebuild)"
+if [[ -n "$CURRENT_FILE" ]]; then
+  [[ "$NEWEST" > "$CURRENT_FILE" ]] && NEWER=1 || NEWER=0
+else  # a current build of no planet file (a test build, an extract): by date
+  [[ -z "$CURRENT_PLANET" || "$PLANET" > "$CURRENT_PLANET" ]] && NEWER=1 || NEWER=0
+fi
+if [[ "$NEWER" == 0 && "$FORCE" == 0 ]]; then
+  # a dry run keeps its own status: it leaves the record of the last real run alone
+  [[ "$DRY_RUN" == 1 ]] && STATUS=dry-run || STATUS=skipped
+  say "skip: the current build already has the planet of $PLANET (--force or $OSM_BASE/force-next-run to rebuild)"
   exit 0
 fi
 if [[ "$DRY_RUN" == 1 ]]; then
@@ -257,6 +275,7 @@ FREE_GB=$(df -Pk "$WORK" | awk 'NR==2 {printf "%d", $4 / 1048576}')
 [[ "$FREE_GB" -ge "$OSM_MIN_FREE_GB" ]] || fail "only $FREE_GB GB free under $WORK, need $OSM_MIN_FREE_GB"
 
 # 6. Build. timeout signals build.sh's whole process group; the docker clients pass it on.
+BEFORE=$(ls -1d "$WORK"/builds/*/ 2>/dev/null | sort || true)
 BUILT=1
 set +e
 # shellcheck disable=SC2086  # option list
@@ -266,8 +285,9 @@ rc=$?
 set -e
 BUILD_DIR=$(printf '%s\n' "$OUT" | tail -1)
 if [[ "$rc" != 0 || ! -f "$BUILD_DIR/manifest.json" ]]; then
-  # shellcheck disable=SC2012  # build ids have no odd characters
-  BUILD_DIR=$(ls -1dt "$WORK"/builds/*/ 2>/dev/null | head -1)  # the newest, for its logs
+  # For its logs: a directory this run made (build.sh moves a failed run's stage to builds/), none
+  # when it made none (killed before it could): never an earlier build's.
+  BUILD_DIR=$(comm -13 <(printf '%s\n' "$BEFORE") <(ls -1d "$WORK"/builds/*/ 2>/dev/null | sort) | tail -1 || true)
   BUILD_DIR=${BUILD_DIR%/}
   fail "build.sh exited with $rc$([[ "$rc" == 124 ]] && echo " (timed out after $OSM_BUILD_TIMEOUT s)")"
 fi
